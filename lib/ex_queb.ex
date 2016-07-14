@@ -23,7 +23,7 @@ defmodule ExQueb do
     |> Enum.reduce(query, fn({k,v}, acc) -> 
       match = "%#{v}%"
       fld = String.to_atom k
-      where(acc, [q], like(field(q, ^fld), ^match))
+      where(acc, [q], ilike(field(q, ^fld), ^match))
     end)
   end
 
