@@ -4,13 +4,15 @@ defmodule ExQueb do
 
   def filter(query, params) do
     q = params[Application.get_env(:ex_queb, :filter_param, :q)] 
+
     if q do
       filters = Map.to_list(q) 
       |> Enum.filter(&(not elem(&1,1) in ["", nil])) 
       |> Enum.map(&({Atom.to_string(elem(&1, 0)), elem(&1, 1)}))
 
-      query
-      |> string_filters(filters)
+      query = query
+      |> string_filters_supporting_or(filters)
+      # |> string_filters(filters)
       |> integer_filters(filters)
       |> date_filters(filters)
     else
@@ -18,12 +20,43 @@ defmodule ExQueb do
     end
   end
 
+  # query = from u in Helios.User
+  # keywords = [name_contains: "Michael", name_contains: "Alex"]
+  # filters = [{"name_contains", "Michael, Alex"}]
+
+  defp split_val_on_comma(keywords) do
+    Enum.flat_map(keywords, fn({k, v}) -> 
+      Enum.map(String.split(v, ","), &({String.to_atom(k), String.trim(&1)})) 
+    end)
+  end
+
+  defp build_wheres(query, keywords) do
+    keys = Keyword.keys(keywords)
+    |> Enum.uniq
+    Enum.map(keys, fn(key) ->
+      val = Keyword.get_values(keywords, key)
+      |> Enum.map(&("ilike(field(q, ^fld), \"%#{&1}%\")"))
+      |> Enum.join(" or ")
+      {key, val}
+    end)
+    |> Enum.reduce(query, fn({k,v}, acc) -> 
+      fld = k
+      elem(Code.eval_string("where(acc, [q], #{v})", [acc: acc, fld: fld], __ENV__), 0)
+    end)
+  end
+
+  defp string_filters_supporting_or(query, filters) do
+    keywords = Enum.filter_map(filters, &(String.match?(elem(&1,0), ~r/_contains$/)), &({String.replace(elem(&1, 0), "_contains", ""), elem(&1, 1)}))
+    keywords = keywords |> split_val_on_comma
+    build_wheres(query, keywords)
+  end
+
   defp string_filters(query, filters) do
     Enum.filter_map(filters, &(String.match?(elem(&1,0), ~r/_contains$/)), &({String.replace(elem(&1, 0), "_contains", ""), elem(&1, 1)}))
     |> Enum.reduce(query, fn({k,v}, acc) -> 
       match = "%#{v}%"
       fld = String.to_atom k
-      where(acc, [q], ilike(field(q, ^fld), ^match))
+      where(acc, [q], like(field(q, ^fld), ^match))
     end)
   end
 
